@@ -1,0 +1,21 @@
+services:
+  # kspd to ext
+  gs-kspd-ext:
+    image: git-sync:latest
+    container_name: gs-kspd-ext
+    volumes:
+      - ./kspd-ext.yaml:/app/config.yaml:ro
+      - tmp-kspd:/tmp
+    restart: no # always
+  # ext to kspd
+  gs-ext-kspd:
+    image: git-sync:latest
+    container_name: gs-ext-kspd
+    volumes:
+      - ./ext-kspd.yaml:/app/config.yaml:ro
+      - tmp-ext:/tmp
+    restart: no # always
+
+volumes:
+  tmp-kspd:
+  tmp-ext:
