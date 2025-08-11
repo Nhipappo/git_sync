@@ -2,8 +2,8 @@
 # актуальные как для src, так и для dst
 set_git_global_settings() {
     echo -e "\033[1;35m|\033[1;36m [INFO] Git global settings set.\033[0m"
-    # git config --global http.postBuffer 2097152000
-    # git config --global http.postBuffer 2097152000
+    git config --global http.postBuffer 1048576000
+    git config --global https.postBuffer 1048576000
     # git config --global http.sslbackend schannel
 }
 
