@@ -1,6 +1,13 @@
+x-basic-logging: &basic-logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "32mb"
+
 services:
   # kspd to ext
   gs-kspd-ext:
+    <<: *basic-logging
     image: git-sync:latest
     container_name: gs-kspd-ext
     volumes:
@@ -9,6 +16,7 @@ services:
     restart: no # always
   # ext to kspd
   gs-ext-kspd:
+    <<: *basic-logging
     image: git-sync:latest
     container_name: gs-ext-kspd
     volumes:
