@@ -2,3 +2,4 @@
 *ext*.yaml
 config.yaml
 .*
+tmp/
