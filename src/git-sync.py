@@ -188,37 +188,45 @@ def update_repo(path: str, name: str, temp_dir: str, src_git_url: str) -> bool:
     return all_success
 
 
-def selecting_branches(path: str, name: str, temp_dir: str, config_path: str, repo_name: str) -> List[str]:
-    """Выбирает ветки для синхронизации"""
+def selecting_branches(path: str, name: str, temp_dir: str, 
+                       config: dict, repo_name: str) -> List[str]:
+    """Выбирает ветки для синхронизации (чистый Python, без yq)"""
     logger.info("Selecting branches.")
     
     repo_path = f"{path}/{name}" if path else name
     local_path = os.path.join(temp_dir, repo_path)
     
-    # Читаем include_branches из конфига
-    import subprocess
-    result = subprocess.run(
-        ["yq", f".repos.[] | select(.name == \"{repo_name}\") | .include_branches[]", config_path],
-        capture_output=True, text=True
-    )
-    include_branches = [b.strip() for b in result.stdout.splitlines() if b.strip()]
+    # Находим нужный репозиторий в конфиге
+    repo_config = None
+    for repo in config.get('repos', []):
+        if repo.get('name') == repo_name:
+            repo_config = repo
+            break
     
-    if not include_branches:
-        # Если include пустой — берём все ветки кроме exclude
-        success, all_branches = run_command(["git", "branch", "--list"], cwd=local_path)
-        all_branches = [b.strip().replace("* ", "") for b in all_branches.splitlines() if b.strip()]
-        
-        result = subprocess.run(
-            ["yq", f".repos.[] | select(.name == \"{repo_name}\") | .exclude_branches[]", config_path],
-            capture_output=True, text=True
-        )
-        exclude_branches = [b.strip() for b in result.stdout.splitlines() if b.strip()]
-        
-        selected = [b for b in all_branches if b not in exclude_branches]
+    if not repo_config:
+        logger.warning(f"Repo '{repo_name}' not found in config")
+        return []
+    
+    include_branches = repo_config.get('include_branches', [])
+    exclude_branches = repo_config.get('exclude_branches', [])
+    
+    if include_branches:
+        # Если include задан — используем только его
+        return [b.strip() for b in include_branches if b.strip()]
     else:
-        selected = include_branches
-    
-    return selected
+        # Иначе берём все локальные ветки, кроме exclude
+        success, all_branches = run_command(["git", "branch", "--list"], cwd=local_path)
+        if not success:
+            return []
+        
+        all_branches = [
+            b.strip().replace("* ", "") 
+            for b in all_branches.splitlines() 
+            if b.strip()
+        ]
+        
+        exclude_set = set(b.strip() for b in exclude_branches if b.strip())
+        return [b for b in all_branches if b not in exclude_set]
 
 
 def push_repo(git_url: str, path: str, name: str, temp_dir: str, 
@@ -363,7 +371,7 @@ def main():
             update_repo(repo_path, repo_name, temp_dir, src_git_url)
             
             # Выбираем ветки
-            selected_branches = selecting_branches(repo_path, repo_name, temp_dir, config_path, repo)
+            selected_branches = selecting_branches(repo_path, repo_name, temp_dir, config, repo)
             
             # Прокси для dst
             set_proxy(dst_proxy)
