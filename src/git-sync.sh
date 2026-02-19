@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # Функция настраивает глобальные параметры git,
 # актуальные как для src, так и для dst
 set_git_global_settings() {
@@ -187,7 +189,22 @@ push_repo() {
 
     cd $temp_dir/$path/$name
 
-    git remote add ext ${git_url}/${path}/${name}.git 2>/dev/null
+    # ✅ ДОБАВЛЕНО: поддержка dst_override для разных имён на src/dst
+    dst_repo_name=$(yq ".repos.[] | select(.name == env(REPO)) | .dst_override // \"$name\"" $config_name)
+    if [[ -z "$dst_repo_name" || "$dst_repo_name" == "null" ]]; then
+        dst_repo_name="$name"
+    fi
+    
+    # Если dst_override содержит путь (группа/репо), разбираем его
+    if [[ "$dst_repo_name" == */* ]]; then
+        dst_path="${dst_repo_name%/*}"
+        dst_name="${dst_repo_name##*/}"
+        dst_remote_url="${git_url}/${dst_path}/${dst_name}.git"
+    else
+        dst_remote_url="${git_url}/${dst_repo_name}.git"
+    fi
+    
+    git remote add ext "$dst_remote_url" 2>/dev/null
 
     branche_iter=0
     number_branches=${#selected_branches[@]}
@@ -249,7 +266,7 @@ push_repo() {
 
 main () {
     ### SETUP base parameters
-    config_name=/app/config.yaml
+    config_name="/e/Projects/git-sync/config.yaml"
     temp_dir=$(yq '.temp_dir' $config_name)
     readarray repos < <(yq '.repos.[].name' $config_name)
     sleep_seconds=$(yq '.wait_next_run_seconds' $config_name)
