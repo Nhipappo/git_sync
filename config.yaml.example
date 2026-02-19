@@ -1,0 +1,22 @@
+temp_dir: /path/to/tmp
+wait_next_run_seconds: 120
+
+git_config:
+  src:
+    url: https://server.ru
+    auth:
+      type: oauth2
+      token: glpat-token
+  dst:
+    url: https://server.ru
+    auth:
+      type: oauth2
+      token: glpat-token
+
+allow_force_push: true
+
+repos:
+  - name: name/repository
+    dst_override: dst_name/dst_repository
+    include_branches: [main]
+    sync_tags: true
