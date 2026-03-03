@@ -1,3 +1,4 @@
+# docker-compose.yml — from-ext первым, to-ext с задержкой
 x-basic-logging: &basic-logging
   logging:
     driver: "json-file"
@@ -5,25 +6,34 @@ x-basic-logging: &basic-logging
       max-size: "32mb"
 
 services:
-  # kspd to ext
-  gs-kspd-ext:
+  # ПЕРВЫЙ: from-ext (com → ext)
+  from-ext:
     <<: *basic-logging
     image: git-sync:latest
-    container_name: gs-kspd-ext
+    container_name: from-ext
     volumes:
-      - ./kspd-ext.yaml:/app/config.yaml:ro
-      - tmp-kspd:/tmp
-    restart: no # always
-  # ext to kspd
-  gs-ext-kspd:
+      - ./configs/from-ext.yaml:/app/src/config.yaml:ro
+      - git-sync-tmp-from-ext:/tmp/git-sync
+    restart: always
+
+  # ВТОРОЙ: to-ext (ext → com) — задержка 5 мин
+  to-ext:
     <<: *basic-logging
     image: git-sync:latest
-    container_name: gs-ext-kspd
+    container_name: to-ext
     volumes:
-      - ./ext-kspd.yaml:/app/config.yaml:ro
-      - tmp-ext:/tmp
-    restart: no # always
+      - ./configs/to-ext.yaml:/app/src/config.yaml:ro
+      - git-sync-tmp-to-ext:/tmp/git-sync
+    restart: always
+    depends_on:
+      from-ext:
+        condition: service_started  
+    command: >
+      sh -c "
+        sleep 30;
+        exec python3 /app/src/main.py
+      "
 
 volumes:
-  tmp-kspd:
-  tmp-ext:
+  git-sync-tmp-to-ext:
+  git-sync-tmp-from-ext:

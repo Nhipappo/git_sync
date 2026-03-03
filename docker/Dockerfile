@@ -1,21 +1,16 @@
-FROM redsoft-registry.gazprom-neft.local:5000/ubi7/ubi-minimal
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-USER root
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN curl -k https://nexus.gazprom-neft.local/repository/local-repo/CA/root-ca-gazprom-neft.pem --output /etc/pki/ca-trust/source/anchors/root-ca-gazprom-neft.crt && \
-    curl -k https://nexus.gazprom-neft.local/repository/local-repo/CA/sub-ca.pem --output /etc/pki/ca-trust/source/anchors/sub-ca.crt && \
-    update-ca-trust
+COPY src/ ./src/
 
-RUN rm -rf /etc/yum.repos.d/*
-COPY ["./docker/repos/*.repo", "/etc/yum.repos.d/"]
+VOLUME ["/app/config.yaml"]
 
-RUN microdnf install -y \
-    yq \
-    git \
-    && microdnf clean all
-
-COPY ["./src/git-sync.sh", "./git-sync.sh"]
-
-CMD ["/bin/bash", "./git-sync.sh"]
+CMD ["python3", "src/main.py"]
