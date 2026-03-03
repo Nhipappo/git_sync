@@ -20,9 +20,6 @@ def _parse_auth(raw_auth: dict) -> AuthConfig:
 
 
 def _parse_endpoint(raw: dict) -> GitEndpoint:
-    """
-    Создаёт GitEndpoint из секции git_config.src или git_config.dst.
-    """
     proxy_raw = raw.get("proxy")
     proxy = proxy_raw if isinstance(proxy_raw, str) and proxy_raw.strip() else None
 
@@ -34,11 +31,6 @@ def _parse_endpoint(raw: dict) -> GitEndpoint:
 
 
 def _parse_repo(raw: dict) -> RepoConfig:
-    """
-    Создаёт RepoConfig из одного элемента списка repos в конфиге.
-
-    Все поля кроме name опциональны.
-    """
     return RepoConfig(
         name=raw["name"].strip(),
         dst_override=raw.get("dst_override") or None,
@@ -49,9 +41,6 @@ def _parse_repo(raw: dict) -> RepoConfig:
 
 
 def parse_config(path: str | Path) -> SyncConfig:
-    """
-    Читает config.yaml и возвращает полностью типизированный SyncConfig.
-    """
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
 
