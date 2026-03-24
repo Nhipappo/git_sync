@@ -23,6 +23,7 @@ def run_pipeline(config: SyncConfig):
         for i, repo in enumerate(config.repos, 1):
             bar = "#" * i + " " * (total - i)
             logger.info(f"\033[1;35mProgress: [{bar}] ({i}/{total}) Repo: '{repo.name}'\033[0m")
+            logger.info(f"Source: {config.src.url}/{repo.name} -> Destination: {config.dst.url}/{repo.dst_override or repo.name}")
 
             try:
                 git_client.set_proxy(config.src.proxy)

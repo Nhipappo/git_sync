@@ -10,33 +10,18 @@ logger = get_logger(__name__)
 
 
 def should_push(src_commit: dict | None, dst_commit: dict | None, branch: str) -> str:
-    """
-    Определяет направление синхронизации для ветки.
-    
-    ЗАМЕНИ ЭТУ ФУНКЦИЮ НА СВОЮ ЛОГИКУ.
-    
-    Args:
-        src_commit: {"hash": ..., "date": ..., "author": ..., "message": ...} или None
-        dst_commit: {"hash": ..., "date": ..., "author": ..., "message": ...} или None
-        branch: Имя ветки
-    
-    Returns:
-        "src_to_dst" | "dst_to_src" | "skip"
-    """
     if not src_commit:
-        return "skip"
+        return "dst_to_src"
     if not dst_commit:
         return "src_to_dst"
     if src_commit["hash"] == dst_commit["hash"]:
         return "skip"
     
-    # Если уже есть [sync] — не синхронизируем (защита от зацикливания)
     if '[sync]' in src_commit["message"].lower():
         return "skip"
     if '[sync]' in dst_commit["message"].lower():
         return "skip"
     
-    # Определяем направление по дате
     if src_commit["date"] > dst_commit["date"]:
         return "src_to_dst"
     else:
@@ -44,31 +29,27 @@ def should_push(src_commit: dict | None, dst_commit: dict | None, branch: str) -
 
 
 def add_sync_marker(client: GitClient, branch: str) -> bool:
-    """
-    Добавляет [sync] к сообщению последнего коммита.
-    
-    Args:
-        client: GitClient с установленным cwd в репозиторий
-        branch: Имя ветки
-    
-    Returns:
-        True если успешно, False если ошибка
-    """
-    # Получаем текущее сообщение коммита
     ok, out = client.run(["git", "log", "-1", "--format=%B", branch])
     if not ok or not out.strip():
+        logger.error(f"Failed to get commit message for {branch}")
         return False
-    
+
     current_message = out.strip()
-    
-    # Добавляем [sync] если ещё нет
+
     if '[sync]' in current_message.lower():
-        return True  # Уже есть маркер
-    
+        logger.info(f"Commit already has [sync] marker: {branch}")
+        return True 
+
     new_message = f"{current_message}\n\n[sync]"
     
-    # Делаем amend с новым сообщением
+    logger.info(f"Adding [sync] marker to commit on {branch}")
+
     ok, log = client.run(["git", "commit", "--amend", "-m", new_message])
+    if not ok:
+        logger.error(f"Failed to amend commit on {branch}: {log}")
+        return False
+    
+    logger.info(f"Successfully added [sync] marker to {branch}")
     return ok
 
 
@@ -86,6 +67,7 @@ def clone_repo(repo: RepoConfig, src_url: str, temp_dir: str) -> bool:
 
     client = GitClient()
     remote = f"{src_url}/{repo.name}.git"
+    logger.info(f"Cloning: {repo.name} from {remote}")
     success, log = client.run(["git", "clone", remote, local])
     _log_result(success, log, "Repository cloned.", "Clone failed.")
     return success
@@ -95,8 +77,11 @@ def update_repo(repo: RepoConfig, src_url: str, temp_dir: str) -> bool:
     local = _local_path(temp_dir, repo)
 
     if not os.path.isdir(local):
+        logger.info(f"Clone: {repo.name} from {src_url}")
         return clone_repo(repo, src_url, temp_dir)
 
+    logger.info(f"Update: {repo.name}")
+    
     client = GitClient(cwd=local)
 
     _track_remote_branches(client)     
@@ -125,11 +110,12 @@ def push_repo(repo: RepoConfig, dst_url: str, temp_dir: str, config: SyncConfig,
     dst_name = repo.dst_override or repo.name
     dst_remote_url = f"{dst_url}/{dst_name}.git"
     client.run(["git", "remote", "add", "ext", dst_remote_url])
-    
-    # Добавляем remote для источника (нужен для dst_to_src)
+
     if src_url:
         src_remote_url = f"{src_url}/{repo.name}.git"
         client.run(["git", "remote", "add", "src", src_remote_url])
+
+    logger.info(f"Sync: {repo.name} (src) <-> {dst_name} (dst)")
 
     selector = make_selector(repo.include_branches, repo.exclude_branches)
     branches = selector.select(local)
@@ -143,48 +129,39 @@ def push_repo(repo: RepoConfig, dst_url: str, temp_dir: str, config: SyncConfig,
         )
 
     for i, branch in enumerate(branches, 1):
-        # Получаем информацию о коммитах
         src_commit = client.get_commit_info(branch)
 
-        # Fetch remote ветку и получаем коммит dst
         client.run(["git", "fetch", "ext", branch])
         dst_commit = client.get_commit_info(f"ext/{branch}")
 
-        # Определяем направление синхронизации
         direction = should_push(src_commit, dst_commit, branch)
 
         if direction == "skip":
             src_hash = src_commit["hash"][:7] if src_commit else "none"
             dst_hash = dst_commit["hash"][:7] if dst_commit else "none"
-            logger.info(f"Branch '{branch}': skip (src={src_hash}, dst={dst_hash})")
+            logger.info(f"Branch '{branch}': skip ({repo.name}={src_hash}, {dst_name}={dst_hash})")
             continue
 
         if direction == "dst_to_src":
-            # Пуш из dst в src (reverse sync)
             src_hash = src_commit["hash"][:7] if src_commit else "none"
             dst_hash = dst_commit["hash"][:7] if dst_commit else "none"
-            logger.info(f"Branch '{branch}': dst_to_src (src={src_hash}, dst={dst_hash})")
+            logger.info(f"Branch '{branch}': dst_to_src ({repo.name}={src_hash}, {dst_name}={dst_hash})")
 
-            # Fetch ext remote (dst) чтобы получить актуальный коммит
             client.run(["git", "fetch", "ext", branch])
             
-            # Сохраняем текущую ветку
             ok, current_branch = client.run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
             current_branch = current_branch.strip() if ok else "main"
             
-            # Создаём временную ветку для работы (чтобы не ломать текущую)
             temp_branch = f"tmp_sync_{branch.replace('/', '_')}"
-            client.run(["git", "checkout", "-B", temp_branch, f"ext/{branch}"])
-            
-            # Добавляем [sync] к коммиту
-            add_sync_marker(client, temp_branch)
+            client.run(["git", "checkout", "-f", "-B", temp_branch, f"ext/{branch}"])
 
-            # Пушим dst-коммит в src
+            sync_added = add_sync_marker(client, temp_branch)
+            logger.info(f"add_sync_marker result: {sync_added} for {temp_branch}")
+
             cmd = ["git", "push", "--force", "src", f"{temp_branch}:{branch}"]
             success, log = client.run(cmd)
             _log_result(success, log, f"Branch '{branch}' pushed to src.", f"Push to src error: {repo.name}")
 
-            # Возвращаемся на исходную ветку, удаляем временную
             client.run(["git", "checkout", current_branch])
             client.run(["git", "branch", "-D", temp_branch])
 
@@ -193,14 +170,15 @@ def push_repo(repo: RepoConfig, dst_url: str, temp_dir: str, config: SyncConfig,
                 break
             continue
 
-        # direction == "src_to_dst"
         src_hash = src_commit["hash"][:7] if src_commit else "none"
         dst_hash = dst_commit["hash"][:7] if dst_commit else "none"
-        logger.info(f"Pushing branch: {branch} [{i}/{len(branches)}] (src={src_hash}, dst={dst_hash})")
-        
-        # Добавляем [sync] к коммиту
-        add_sync_marker(client, branch)
-        
+        logger.info(f"Pushing branch: {branch} [{i}/{len(branches)}] ({repo.name}={src_hash} -> {dst_name}={dst_hash})")
+
+        client.run(["git", "checkout", "-f", branch])
+
+        sync_added = add_sync_marker(client, branch)
+        logger.info(f"add_sync_marker result: {sync_added} for {branch}")
+
         cmd = ["git", "push", "ext", branch]
         if config.allow_force_push:
             cmd.insert(3, "--force")
