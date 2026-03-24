@@ -26,3 +26,28 @@ class GitClient:
         run_command(["git", "config", "--global", "http.postBuffer",  "1048576000"])
         run_command(["git", "config", "--global", "https.postBuffer", "1048576000"])
         logger.info("Git global settings set.")
+
+    def get_commit_info(self, branch: str) -> dict | None:
+        """
+        Возвращает информацию о последнем коммите ветки.
+        
+        Args:
+            branch: Имя ветки (например, "main", "origin/feature")
+        
+        Returns:
+            dict с полями: hash, date, author, message
+            или None если ветка не найдена
+        """
+        cmd = ["git", "log", "-1", "--format=%H%n%ai%n%an%n%s", branch]
+        ok, out = self.run(cmd)
+        if not ok or not out.strip():
+            return None
+        lines = out.strip().splitlines()
+        if len(lines) < 4:
+            return None
+        return {
+            "hash": lines[0],
+            "date": lines[1],
+            "author": lines[2],
+            "message": lines[3]
+        }

@@ -29,7 +29,7 @@ def run_pipeline(config: SyncConfig):
                 update_repo(repo, config.src.authed_url, config.temp_dir)
 
                 git_client.set_proxy(config.dst.proxy)
-                push_repo(repo, config.dst.authed_url, config.temp_dir, config)
+                push_repo(repo, config.dst.authed_url, config.temp_dir, config, config.src.authed_url)
 
             except Exception as e:
                 logger.error(f"Unhandled error for repo '{repo.name}': {e}")
