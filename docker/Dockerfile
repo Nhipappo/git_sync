@@ -11,6 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 
-VOLUME ["/app/config.yaml"]
-
 CMD ["python3", "src/main.py"]

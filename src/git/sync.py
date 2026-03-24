@@ -9,6 +9,15 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _parse_date_to_timestamp(date_str: str) -> int:
+    from datetime import datetime
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
+        return int(dt.timestamp())
+    except (ValueError, TypeError):
+        return 0
+
+
 def should_push(src_commit: dict | None, dst_commit: dict | None, branch: str) -> str:
     if not src_commit:
         return "dst_to_src"
@@ -16,16 +25,26 @@ def should_push(src_commit: dict | None, dst_commit: dict | None, branch: str) -
         return "src_to_dst"
     if src_commit["hash"] == dst_commit["hash"]:
         return "skip"
-    
-    if '[sync]' in src_commit["message"].lower():
-        return "skip"
-    if '[sync]' in dst_commit["message"].lower():
-        return "skip"
-    
-    if src_commit["date"] > dst_commit["date"]:
+
+    src_ts = _parse_date_to_timestamp(src_commit["date"])
+    dst_ts = _parse_date_to_timestamp(dst_commit["date"])
+
+    if src_ts > dst_ts:
+        if '[sync]' in src_commit["message"].lower():
+            return "skip"
         return "src_to_dst"
-    else:
+    elif src_ts < dst_ts:
         return "dst_to_src"
+    else:
+        return "skip"   
+
+
+def _format_commit_info(commit: dict | None) -> str:
+    if not commit:
+        return "none"
+    timestamp = _parse_date_to_timestamp(commit["date"])
+    msg = commit["message"][-50:].replace('\n', ' ')
+    return f"{timestamp} '{msg}'"
 
 
 def add_sync_marker(client: GitClient, branch: str) -> bool:
@@ -38,18 +57,18 @@ def add_sync_marker(client: GitClient, branch: str) -> bool:
 
     if '[sync]' in current_message.lower():
         logger.info(f"Commit already has [sync] marker: {branch}")
-        return True 
+        return True
 
-    new_message = f"{current_message}\n\n[sync]"
-    
-    logger.info(f"Adding [sync] marker to commit on {branch}")
+    new_message = f"{current_message} [sync]"
 
-    ok, log = client.run(["git", "commit", "--amend", "-m", new_message])
+    logger.info(f"Adding [sync] marker commit on {branch}")
+
+    ok, log = client.run(["git", "commit", "--allow-empty", "-m", new_message])
     if not ok:
-        logger.error(f"Failed to amend commit on {branch}: {log}")
+        logger.error(f"Failed to add sync marker commit on {branch}: {log}")
         return False
-    
-    logger.info(f"Successfully added [sync] marker to {branch}")
+
+    logger.info(f"Successfully added [sync] marker commit to {branch}")
     return ok
 
 
@@ -92,7 +111,6 @@ def update_repo(repo: RepoConfig, src_url: str, temp_dir: str) -> bool:
         ["git", "fetch", "--all", "--prune"],
         ["git", "pull", "--all"],
         ["git", "fetch", "--tags", "--prune-tags"],
-        ["git", "pull", "--tags"],
     ]:
         success, log = client.run(cmd)
         if not success:
@@ -137,21 +155,21 @@ def push_repo(repo: RepoConfig, dst_url: str, temp_dir: str, config: SyncConfig,
         direction = should_push(src_commit, dst_commit, branch)
 
         if direction == "skip":
-            src_hash = src_commit["hash"][:7] if src_commit else "none"
-            dst_hash = dst_commit["hash"][:7] if dst_commit else "none"
-            logger.info(f"Branch '{branch}': skip ({repo.name}={src_hash}, {dst_name}={dst_hash})")
+            src_info = _format_commit_info(src_commit)
+            dst_info = _format_commit_info(dst_commit)
+            logger.info(f"Branch '{branch}': skip ({repo.name}={src_info}, {dst_name}={dst_info})")
             continue
 
         if direction == "dst_to_src":
-            src_hash = src_commit["hash"][:7] if src_commit else "none"
-            dst_hash = dst_commit["hash"][:7] if dst_commit else "none"
-            logger.info(f"Branch '{branch}': dst_to_src ({repo.name}={src_hash}, {dst_name}={dst_hash})")
+            src_info = _format_commit_info(src_commit)
+            dst_info = _format_commit_info(dst_commit)
+            logger.info(f"Branch '{branch}': dst_to_src ({repo.name}={src_info}, {dst_name}={dst_info})")
 
             client.run(["git", "fetch", "ext", branch])
-            
+
             ok, current_branch = client.run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
             current_branch = current_branch.strip() if ok else "main"
-            
+
             temp_branch = f"tmp_sync_{branch.replace('/', '_')}"
             client.run(["git", "checkout", "-f", "-B", temp_branch, f"ext/{branch}"])
 
@@ -170,9 +188,9 @@ def push_repo(repo: RepoConfig, dst_url: str, temp_dir: str, config: SyncConfig,
                 break
             continue
 
-        src_hash = src_commit["hash"][:7] if src_commit else "none"
-        dst_hash = dst_commit["hash"][:7] if dst_commit else "none"
-        logger.info(f"Pushing branch: {branch} [{i}/{len(branches)}] ({repo.name}={src_hash} -> {dst_name}={dst_hash})")
+        src_info = _format_commit_info(src_commit)
+        dst_info = _format_commit_info(dst_commit)
+        logger.info(f"Pushing branch: {branch} [{i}/{len(branches)}] ({repo.name}={src_info} -> {dst_name}={dst_info})")
 
         client.run(["git", "checkout", "-f", branch])
 
@@ -229,7 +247,10 @@ def _delete_gone_branches(client: GitClient):
         return
     for line in out.splitlines():
         if ": gone]" in line:
-            branch = line.split()[0].strip()
+            parts = line.split()
+            if parts[0] == "*":
+                continue
+            branch = parts[0].strip()
             if branch:
                 client.run(["git", "branch", "-D", branch])
 
